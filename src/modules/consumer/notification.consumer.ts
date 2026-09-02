@@ -15,9 +15,9 @@ import { ReadStatus } from '../../domain/enums/read-status.enum';
 import { ReferenceType } from '../../domain/enums/reference-type.enum';
 import { Clock } from '../../domain/ports/clock.port';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
 import { ProcessedEventRepositoryPort } from '../../domain/ports/processed-event.repository.port';
 import { DeliveryService } from '../delivery/delivery.service';
+import { NotificationService } from '../notification/notification.service';
 import { TemplateService } from '../template/template.service';
 import {
   COMMAND_CATEGORY,
@@ -52,7 +52,7 @@ interface IngestSpec {
 @Injectable()
 export class NotificationConsumer {
   constructor(
-    private readonly notificationRepository: NotificationRepositoryPort,
+    private readonly notificationService: NotificationService,
     private readonly processedEventRepository: ProcessedEventRepositoryPort,
     private readonly templateService: TemplateService,
     private readonly deliveryService: DeliveryService,
@@ -139,7 +139,7 @@ export class NotificationConsumer {
   }
 
   private async ingest(spec: IngestSpec): Promise<{ notification: Notification; created: boolean }> {
-    const existing = await this.notificationRepository.findByDedupeKey(spec.recipientUserId, spec.dedupeKey, spec.channel);
+    const existing = await this.notificationService.findByDedupeKey(spec.recipientUserId, spec.dedupeKey, spec.channel);
     if (existing) {
       if (existing.sourceEventId === spec.sourceEventId) {
         return { notification: existing, created: false };
@@ -172,7 +172,7 @@ export class NotificationConsumer {
     notification.scheduledAt = this.clock.now();
     notification.sentAt = null;
 
-    const saved = await this.notificationRepository.save(notification);
+    const saved = await this.notificationService.save(notification);
     return { notification: saved, created: true };
   }
 

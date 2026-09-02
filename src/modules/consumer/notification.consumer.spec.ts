@@ -1,8 +1,8 @@
 import { NotificationConsumer } from './notification.consumer';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
 import { ProcessedEventRepositoryPort } from '../../domain/ports/processed-event.repository.port';
 import { TemplateService } from '../template/template.service';
 import { DeliveryService } from '../delivery/delivery.service';
+import { NotificationService } from '../notification/notification.service';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
 import { Clock } from '../../domain/ports/clock.port';
 import { AppConfigService } from '../../config/app-config';
@@ -24,10 +24,10 @@ const COMMAND: NotificationCommand = {
 };
 
 function setup() {
-  const notificationRepository = {
+  const notificationService = {
     findByDedupeKey: jest.fn().mockResolvedValue(null),
     save: jest.fn().mockImplementation(async (n) => n),
-  } as unknown as jest.Mocked<NotificationRepositoryPort>;
+  } as unknown as jest.Mocked<NotificationService>;
   const processedEventRepository = {
     existsByEventId: jest.fn().mockResolvedValue(false),
     save: jest.fn().mockImplementation(async (e) => e),
@@ -57,7 +57,7 @@ function setup() {
   } as unknown as AppLogger;
 
   const consumer = new NotificationConsumer(
-    notificationRepository,
+    notificationService,
     processedEventRepository,
     templateService,
     deliveryService,
@@ -66,27 +66,27 @@ function setup() {
     config,
     logger,
   );
-  return { consumer, notificationRepository, processedEventRepository, deliveryService };
+  return { consumer, notificationService, processedEventRepository, deliveryService };
 }
 
 describe('NotificationConsumer', () => {
   it('should create notification, mark processed, and dispatch on command', async () => {
-    const { consumer, notificationRepository, processedEventRepository, deliveryService } = setup();
+    const { consumer, notificationService, processedEventRepository, deliveryService } = setup();
 
     await consumer.handleCommand(COMMAND, {});
 
-    expect(notificationRepository.save).toHaveBeenCalled();
+    expect(notificationService.save).toHaveBeenCalled();
     expect(processedEventRepository.save).toHaveBeenCalled();
     expect(deliveryService.dispatch).toHaveBeenCalledWith('id-x');
   });
 
   it('should skip when event already processed', async () => {
-    const { consumer, processedEventRepository, notificationRepository, deliveryService } = setup();
+    const { consumer, processedEventRepository, notificationService, deliveryService } = setup();
     processedEventRepository.existsByEventId.mockResolvedValue(true);
 
     await consumer.handleCommand(COMMAND, {});
 
-    expect(notificationRepository.save).not.toHaveBeenCalled();
+    expect(notificationService.save).not.toHaveBeenCalled();
     expect(deliveryService.dispatch).not.toHaveBeenCalled();
   });
 
