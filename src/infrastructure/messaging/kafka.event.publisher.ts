@@ -5,7 +5,7 @@ import { AppLogger } from '../../common/logging/app.logger';
 import { DeliveryStatusEvent, EventPublisherPort } from '../../domain/ports/event-publisher.port';
 
 // Adapter phát event delivery status (notification.delivered.v1 / notification.failed.v1).
-// Best-effort observability: không throw để không làm hỏng luồng delivery chính.
+// Throw khi publish thất bại để outbox relay biết giữ lại retry — không nuốt lỗi.
 @Injectable()
 export class KafkaEventPublisher implements EventPublisherPort, OnModuleInit, OnModuleDestroy {
   private producer: Producer | null = null;
@@ -52,6 +52,7 @@ export class KafkaEventPublisher implements EventPublisherPort, OnModuleInit, On
         notificationId: event.notificationId,
         error: err,
       });
+      throw err;
     }
   }
 }
