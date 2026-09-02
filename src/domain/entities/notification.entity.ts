@@ -65,6 +65,10 @@ export class Notification {
   @Column({ name: 'scheduled_at', type: 'datetime', precision: 6, nullable: true })
   scheduledAt: Date | null;
 
+  // Lease xử lý: đặt khi worker claim PROCESSING; sweeper chỉ reclaim khi lease đã quá staleBefore.
+  @Column({ name: 'processing_started_at', type: 'datetime', precision: 6, nullable: true })
+  processingStartedAt: Date | null;
+
   @Column({ name: 'sent_at', type: 'datetime', precision: 6, nullable: true })
   sentAt: Date | null;
 

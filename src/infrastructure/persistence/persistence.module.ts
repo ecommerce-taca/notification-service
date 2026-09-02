@@ -1,12 +1,14 @@
 import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DeliveryAttempt } from '../../domain/entities/delivery-attempt.entity';
+import { DeliveryOutbox } from '../../domain/entities/delivery-outbox.entity';
 import { Notification } from '../../domain/entities/notification.entity';
 import { NotificationAudit } from '../../domain/entities/notification-audit.entity';
 import { NotificationPreference } from '../../domain/entities/notification-preference.entity';
 import { ProcessedEvent } from '../../domain/entities/processed-event.entity';
 import { Template } from '../../domain/entities/template.entity';
 import { DeliveryAttemptRepositoryPort } from '../../domain/ports/delivery-attempt.repository.port';
+import { DeliveryOutboxRepositoryPort } from '../../domain/ports/delivery-outbox.repository.port';
 import { NotificationAuditRepositoryPort } from '../../domain/ports/notification-audit.repository.port';
 import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
 import { PreferenceRepositoryPort } from '../../domain/ports/preference.repository.port';
@@ -14,13 +16,22 @@ import { ProcessedEventRepositoryPort } from '../../domain/ports/processed-event
 import { TemplateRepositoryPort } from '../../domain/ports/template.repository.port';
 import { AppConfigService } from '../../config/app-config';
 import { DeliveryAttemptTypeOrmRepository } from './repositories/delivery-attempt.typeorm.repository';
+import { DeliveryOutboxTypeOrmRepository } from './repositories/delivery-outbox.typeorm.repository';
 import { NotificationAuditTypeOrmRepository } from './repositories/notification-audit.typeorm.repository';
 import { NotificationTypeOrmRepository } from './repositories/notification.typeorm.repository';
 import { PreferenceTypeOrmRepository } from './repositories/preference.typeorm.repository';
 import { ProcessedEventTypeOrmRepository } from './repositories/processed-event.typeorm.repository';
 import { TemplateTypeOrmRepository } from './repositories/template.typeorm.repository';
 
-const entities = [Notification, Template, NotificationPreference, DeliveryAttempt, ProcessedEvent, NotificationAudit];
+const entities = [
+  Notification,
+  Template,
+  NotificationPreference,
+  DeliveryAttempt,
+  DeliveryOutbox,
+  ProcessedEvent,
+  NotificationAudit,
+];
 
 // Persistence là hạ tầng; business code chỉ inject port, không thấy Repository<T>/DataSource.
 @Global()
@@ -48,6 +59,7 @@ const entities = [Notification, Template, NotificationPreference, DeliveryAttemp
     { provide: TemplateRepositoryPort, useClass: TemplateTypeOrmRepository },
     { provide: PreferenceRepositoryPort, useClass: PreferenceTypeOrmRepository },
     { provide: DeliveryAttemptRepositoryPort, useClass: DeliveryAttemptTypeOrmRepository },
+    { provide: DeliveryOutboxRepositoryPort, useClass: DeliveryOutboxTypeOrmRepository },
     { provide: ProcessedEventRepositoryPort, useClass: ProcessedEventTypeOrmRepository },
     { provide: NotificationAuditRepositoryPort, useClass: NotificationAuditTypeOrmRepository },
   ],
@@ -56,6 +68,7 @@ const entities = [Notification, Template, NotificationPreference, DeliveryAttemp
     TemplateRepositoryPort,
     PreferenceRepositoryPort,
     DeliveryAttemptRepositoryPort,
+    DeliveryOutboxRepositoryPort,
     ProcessedEventRepositoryPort,
     NotificationAuditRepositoryPort,
   ],
