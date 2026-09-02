@@ -50,7 +50,10 @@ export class NotificationTypeOrmRepository implements NotificationRepositoryPort
       qb.andWhere('n.category = :category', { category: query.category });
     }
 
+    // Tiebreak theo _id: created_at là DATETIME(6) nên các row tạo cùng batch có thể trùng khít,
+    // thiếu khoá phụ thì thứ tự giữa chúng không ổn định → phân trang lặp/sót row.
     qb.orderBy('n.created_at', 'DESC')
+      .addOrderBy('n._id', 'DESC')
       .skip((query.page - 1) * query.size)
       .take(query.size);
 
@@ -113,7 +116,9 @@ export class NotificationTypeOrmRepository implements NotificationRepositoryPort
     if (query.from) qb.andWhere('n.created_at >= :from', { from: query.from });
     if (query.to) qb.andWhere('n.created_at <= :to', { to: query.to });
 
+    // Cùng lý do tiebreak như findPaged.
     qb.orderBy('n.created_at', 'DESC')
+      .addOrderBy('n._id', 'DESC')
       .skip((query.page - 1) * query.size)
       .take(query.size);
 
