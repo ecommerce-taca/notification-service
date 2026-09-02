@@ -11,14 +11,14 @@ import { Clock } from '../../domain/ports/clock.port';
 import { DeliveryAttemptRepositoryPort } from '../../domain/ports/delivery-attempt.repository.port';
 import { DeliveryOutcome, EventPublisherPort } from '../../domain/ports/event-publisher.port';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
 import { DeliverySendError, DispatcherService } from '../dispatcher/dispatcher.service';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class DeliveryService {
   constructor(
     private readonly dispatcher: DispatcherService,
-    private readonly notificationRepository: NotificationRepositoryPort,
+    private readonly notificationService: NotificationService,
     private readonly deliveryAttemptRepository: DeliveryAttemptRepositoryPort,
     private readonly eventPublisher: EventPublisherPort,
     private readonly idGenerator: IdGenerator,
@@ -28,13 +28,13 @@ export class DeliveryService {
   ) {}
 
   async dispatch(notificationId: string): Promise<void> {
-    const notification = await this.notificationRepository.findById(notificationId);
+    const notification = await this.notificationService.findById(notificationId);
     if (!notification) return;
     if (notification.status === NotificationStatus.SENT || notification.status === NotificationStatus.SKIPPED) {
       return;
     }
 
-    await this.notificationRepository.updateStatus(notificationId, NotificationStatus.PROCESSING);
+    await this.notificationService.updateStatus(notificationId, NotificationStatus.PROCESSING);
 
     const maxAttempts = this.config.config.delivery.retryCount;
     for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
@@ -44,11 +44,11 @@ export class DeliveryService {
         await this.recordAttempt(notification, attemptNo, AttemptStatus.SENT, null, attemptStartedAt);
 
         if (outcome === 'skipped') {
-          await this.notificationRepository.updateStatus(notificationId, NotificationStatus.SKIPPED);
+          await this.notificationService.updateStatus(notificationId, NotificationStatus.SKIPPED);
           return;
         }
 
-        await this.notificationRepository.updateStatus(notificationId, NotificationStatus.SENT, {
+        await this.notificationService.updateStatus(notificationId, NotificationStatus.SENT, {
           sentAt: this.clock.now(),
         });
         await this.publishDeliveryStatus(notification, 'delivered', null);
@@ -75,8 +75,14 @@ export class DeliveryService {
     }
   }
 
+  // Admin cần attempt theo danh sách notification để dựng view deliveries; đây là read duy nhất
+  // của DeliveryAttempt nằm ngoài chính service này (service khác đi qua đây, không chạm repo).
+  async findAttemptsByNotificationIds(notificationIds: string[]): Promise<DeliveryAttempt[]> {
+    return this.deliveryAttemptRepository.findByNotificationIds(notificationIds);
+  }
+
   private async fail(notification: Notification, errorCode: string): Promise<void> {
-    await this.notificationRepository.updateStatus(notification.id, NotificationStatus.FAILED);
+    await this.notificationService.updateStatus(notification.id, NotificationStatus.FAILED);
     await this.publishDeliveryStatus(notification, 'failed', errorCode);
   }
 

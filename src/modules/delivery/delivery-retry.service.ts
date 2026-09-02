@@ -1,8 +1,8 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../../config/app-config';
 import { AppLogger } from '../../common/logging/app.logger';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
 import { DeliveryService } from './delivery.service';
+import { NotificationService } from '../notification/notification.service';
 
 // Quét lại thông báo QUEUED/PROCESSING bị kẹt (crash giữa persist và SENT).
 // Ngưỡng stale đảm bảo không re-dispatch thông báo đang xử lý trong cửa sổ ngắn.
@@ -11,7 +11,7 @@ export class DeliveryRetryService implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
 
   constructor(
-    private readonly notificationRepository: NotificationRepositoryPort,
+    private readonly notificationService: NotificationService,
     private readonly deliveryService: DeliveryService,
     private readonly config: AppConfigService,
     private readonly logger: AppLogger,
@@ -30,7 +30,7 @@ export class DeliveryRetryService implements OnModuleInit, OnModuleDestroy {
 
   private async sweep(): Promise<void> {
     const staleBefore = new Date(Date.now() - this.config.config.delivery.staleAfterMs);
-    const stuck = await this.notificationRepository.findPendingDelivery(staleBefore, 100);
+    const stuck = await this.notificationService.findPendingDelivery(staleBefore, 100);
     for (const notification of stuck) {
       void this.deliveryService
         .dispatch(notification.id)

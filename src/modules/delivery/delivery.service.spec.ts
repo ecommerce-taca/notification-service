@@ -1,6 +1,6 @@
 import { DeliveryService } from './delivery.service';
 import { DispatcherService, DeliverySendError } from '../dispatcher/dispatcher.service';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
+import { NotificationService } from '../notification/notification.service';
 import { DeliveryAttemptRepositoryPort } from '../../domain/ports/delivery-attempt.repository.port';
 import { EventPublisherPort } from '../../domain/ports/event-publisher.port';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
@@ -40,10 +40,10 @@ function makeNotification(status: NotificationStatus): Notification {
 
 function setup(retryCount = 3) {
   const dispatcher = { dispatch: jest.fn() } as unknown as jest.Mocked<DispatcherService>;
-  const notificationRepository = {
+  const notificationService = {
     findById: jest.fn(),
     updateStatus: jest.fn(),
-  } as unknown as jest.Mocked<NotificationRepositoryPort>;
+  } as unknown as jest.Mocked<NotificationService>;
   const deliveryAttemptRepository = {
     save: jest.fn(),
   } as unknown as jest.Mocked<DeliveryAttemptRepositoryPort>;
@@ -61,7 +61,7 @@ function setup(retryCount = 3) {
 
   const service = new DeliveryService(
     dispatcher,
-    notificationRepository,
+    notificationService,
     deliveryAttemptRepository,
     eventPublisher,
     idGenerator,
@@ -69,34 +69,34 @@ function setup(retryCount = 3) {
     config,
     logger,
   );
-  return { service, dispatcher, notificationRepository, deliveryAttemptRepository, eventPublisher };
+  return { service, dispatcher, notificationService, deliveryAttemptRepository, eventPublisher };
 }
 
 describe('DeliveryService', () => {
   it('should mark SENT and publish delivered on success', async () => {
-    const { service, dispatcher, notificationRepository, eventPublisher } = setup();
-    notificationRepository.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
+    const { service, dispatcher, notificationService, eventPublisher } = setup();
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
     dispatcher.dispatch.mockResolvedValue('sent');
 
     await service.dispatch('ntf-1');
 
-    expect(notificationRepository.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.SENT, expect.any(Object));
+    expect(notificationService.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.SENT, expect.any(Object));
     expect(eventPublisher.publishDeliveryStatus).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'delivered' }));
   });
 
   it('should mark SKIPPED when preference disables email', async () => {
-    const { service, dispatcher, notificationRepository } = setup();
-    notificationRepository.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
+    const { service, dispatcher, notificationService } = setup();
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
     dispatcher.dispatch.mockResolvedValue('skipped');
 
     await service.dispatch('ntf-1');
 
-    expect(notificationRepository.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.SKIPPED);
+    expect(notificationService.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.SKIPPED);
   });
 
   it('should retry retryable failures then succeed', async () => {
-    const { service, dispatcher, deliveryAttemptRepository, notificationRepository } = setup(3);
-    notificationRepository.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
+    const { service, dispatcher, deliveryAttemptRepository, notificationService } = setup(3);
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
     dispatcher.dispatch
       .mockRejectedValueOnce(new DeliverySendError('SMTP_TIMEOUT', true))
       .mockRejectedValueOnce(new DeliverySendError('SMTP_TIMEOUT', true))
@@ -106,23 +106,23 @@ describe('DeliveryService', () => {
 
     expect(dispatcher.dispatch).toHaveBeenCalledTimes(3);
     expect(deliveryAttemptRepository.save).toHaveBeenCalledTimes(3);
-    expect(notificationRepository.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.SENT, expect.any(Object));
+    expect(notificationService.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.SENT, expect.any(Object));
   });
 
   it('should mark FAILED and publish failed on permanent failure', async () => {
-    const { service, dispatcher, notificationRepository, eventPublisher } = setup();
-    notificationRepository.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
+    const { service, dispatcher, notificationService, eventPublisher } = setup();
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
     dispatcher.dispatch.mockRejectedValue(new DeliverySendError('SMTP_REJECTED', false));
 
     await service.dispatch('ntf-1');
 
-    expect(notificationRepository.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.FAILED);
+    expect(notificationService.updateStatus).toHaveBeenCalledWith('ntf-1', NotificationStatus.FAILED);
     expect(eventPublisher.publishDeliveryStatus).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
   });
 
   it('should skip dispatch for already SENT notification', async () => {
-    const { service, dispatcher, notificationRepository } = setup();
-    notificationRepository.findById.mockResolvedValue(makeNotification(NotificationStatus.SENT));
+    const { service, dispatcher, notificationService } = setup();
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.SENT));
 
     await service.dispatch('ntf-1');
 
