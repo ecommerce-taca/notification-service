@@ -1,0 +1,10 @@
+export enum NotificationCategory {
+  ORDER = 'ORDER',
+  SHIPMENT = 'SHIPMENT',
+  PAYMENT = 'PAYMENT',
+  REVIEW = 'REVIEW',
+  CONVERSATION = 'CONVERSATION',
+  SHOP = 'SHOP',
+  SECURITY = 'SECURITY',
+  MARKETING = 'MARKETING',
+}
