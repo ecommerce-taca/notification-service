@@ -1,5 +1,5 @@
 import { InAppService } from './in-app.service';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
+import { NotificationService } from '../notification/notification.service';
 import { TemplateService } from '../template/template.service';
 import { PreferenceService } from '../preference/preference.service';
 import { Notification } from '../../domain/entities/notification.entity';
@@ -38,13 +38,13 @@ function makeNotification(overrides: Partial<Notification> = {}): Notification {
 }
 
 function setup() {
-  const notificationRepository = {
+  const notificationService = {
     findPaged: jest.fn(),
     countUnread: jest.fn().mockResolvedValue(0),
     findByIdAndRecipient: jest.fn(),
     markRead: jest.fn(),
     markAllRead: jest.fn(),
-  } as unknown as jest.Mocked<NotificationRepositoryPort>;
+  } as unknown as jest.Mocked<NotificationService>;
   const templateService = {
     loadByKeys: jest.fn().mockResolvedValue(new Map()),
     render: jest.fn().mockReturnValue({ title: 'T', body: 'B' }),
@@ -60,15 +60,15 @@ function setup() {
     isLockedCategory: jest.fn(),
   } as unknown as jest.Mocked<PreferenceService>;
 
-  const service = new InAppService(notificationRepository, templateService, preferenceService);
-  return { service, notificationRepository, templateService };
+  const service = new InAppService(notificationService, templateService, preferenceService);
+  return { service, notificationService, templateService };
 }
 
 describe('InAppService', () => {
   it('should list notifications with unread count', async () => {
-    const { service, notificationRepository } = setup();
-    notificationRepository.findPaged.mockResolvedValue({ items: [makeNotification()], total: 1 });
-    notificationRepository.countUnread.mockResolvedValue(3);
+    const { service, notificationService } = setup();
+    notificationService.findPaged.mockResolvedValue({ items: [makeNotification()], total: 1 });
+    notificationService.countUnread.mockResolvedValue(3);
 
     const result = await service.list('user-1', { page: 1, size: 20 });
 
@@ -79,16 +79,16 @@ describe('InAppService', () => {
   });
 
   it('should throw NOT_FOUND when marking read for another user', async () => {
-    const { service, notificationRepository } = setup();
-    notificationRepository.findByIdAndRecipient.mockResolvedValue(null);
+    const { service, notificationService } = setup();
+    notificationService.findByIdAndRecipient.mockResolvedValue(null);
 
     await expect(service.markRead('user-1', 'ntf-1')).rejects.toBeInstanceOf(AppException);
     await expect(service.markRead('user-1', 'ntf-1')).rejects.toMatchObject({ code: 'NOTIFICATION_NOT_FOUND' });
   });
 
   it('should throw NOT_FOUND when marking read for email notification', async () => {
-    const { service, notificationRepository } = setup();
-    notificationRepository.findByIdAndRecipient.mockResolvedValue(
+    const { service, notificationService } = setup();
+    notificationService.findByIdAndRecipient.mockResolvedValue(
       makeNotification({ channel: Channel.EMAIL, recipientEncrypted: 'enc' }),
     );
 

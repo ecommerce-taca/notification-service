@@ -7,8 +7,8 @@ import { Notification } from '../../domain/entities/notification.entity';
 import { AttemptStatus } from '../../domain/enums/attempt-status.enum';
 import { Channel } from '../../domain/enums/channel.enum';
 import { NotificationStatus } from '../../domain/enums/notification-status.enum';
-import { DeliveryAttemptRepositoryPort } from '../../domain/ports/delivery-attempt.repository.port';
-import { NotificationRepositoryPort } from '../../domain/ports/notification.repository.port';
+import { DeliveryService } from '../delivery/delivery.service';
+import { NotificationService } from '../notification/notification.service';
 import { AdminDeliveryResponse } from '../in-app/dto/response.dto';
 
 function providerStatusFromAttempt(attempt: DeliveryAttempt | undefined): string | null {
@@ -59,13 +59,13 @@ export interface ListDeliveriesQuery {
 @Injectable()
 export class AdminService {
   constructor(
-    private readonly notificationRepository: NotificationRepositoryPort,
-    private readonly deliveryAttemptRepository: DeliveryAttemptRepositoryPort,
+    private readonly notificationService: NotificationService,
+    private readonly deliveryService: DeliveryService,
     private readonly config: AppConfigService,
   ) {}
 
   async listDeliveries(query: ListDeliveriesQuery): Promise<{ items: AdminDeliveryResponse[]; total: number }> {
-    const { items, total } = await this.notificationRepository.findDeliveries({
+    const { items, total } = await this.notificationService.findDeliveries({
       page: query.page,
       size: query.size,
       status: query.status,
@@ -76,7 +76,7 @@ export class AdminService {
       to: query.to ? new Date(query.to) : undefined,
     });
 
-    const attempts = await this.deliveryAttemptRepository.findByNotificationIds(
+    const attempts = await this.deliveryService.findAttemptsByNotificationIds(
       items.map((notification) => notification.id),
     );
     const attemptsByNotification = new Map<string, DeliveryAttempt[]>();
