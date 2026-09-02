@@ -33,4 +33,13 @@ export class DeliveryAttemptTypeOrmRepository implements DeliveryAttemptReposito
   async countByNotification(notificationId: string): Promise<number> {
     return this.repo.count({ where: { notificationId } });
   }
+
+  async findLastAttemptNo(notificationId: string): Promise<number> {
+    const row = await this.repo
+      .createQueryBuilder('a')
+      .select('MAX(a.attempt_no)', 'max')
+      .where('a.notification_id = :notificationId', { notificationId })
+      .getRawOne<{ max: string | number | null }>();
+    return Number(row?.max ?? 0);
+  }
 }

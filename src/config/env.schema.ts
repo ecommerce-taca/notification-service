@@ -28,6 +28,7 @@ export const envSchema = z.object({
   SMTP_SECURE: z.string().default('false').transform((v) => v === 'true'),
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
+  SMTP_TIMEOUT_MS: z.coerce.number().int().min(100).max(120000).default(5000),
   EMAIL_FROM_NAME: z.string().min(1).default('Taca'),
   EMAIL_FROM_ADDRESS: z.string().min(1),
 
@@ -38,10 +39,12 @@ export const envSchema = z.object({
   RECIPIENT_HASH_SECRET: z.string().min(32),
   RECIPIENT_ENCRYPTION_SECRET: z.string().min(32),
 
+  // Tổng số lần gửi tối đa (gồm lần đầu) — không phải số lần retry thêm.
   DELIVERY_RETRY_COUNT: z.coerce.number().int().min(0).max(10).default(3),
   DELIVERY_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).max(60000).default(2000),
   DELIVERY_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).max(3600000).default(30000),
   DELIVERY_STALE_AFTER_MS: z.coerce.number().int().min(1000).max(3600000).default(60000),
+  OUTBOX_RELAY_INTERVAL_MS: z.coerce.number().int().min(1000).max(3600000).default(5000),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { DataSource } from 'typeorm';
 import { z } from 'zod';
 import { DeliveryAttempt } from '../../domain/entities/delivery-attempt.entity';
+import { DeliveryOutbox } from '../../domain/entities/delivery-outbox.entity';
 import { Notification } from '../../domain/entities/notification.entity';
 import { NotificationAudit } from '../../domain/entities/notification-audit.entity';
 import { NotificationPreference } from '../../domain/entities/notification-preference.entity';
@@ -31,7 +32,15 @@ export const appDataSource = new DataSource({
   database: dbEnv.DB_NAME,
   charset: 'utf8mb4',
   timezone: 'Z',
-  entities: [Notification, Template, NotificationPreference, DeliveryAttempt, ProcessedEvent, NotificationAudit],
+  entities: [
+    Notification,
+    Template,
+    NotificationPreference,
+    DeliveryAttempt,
+    DeliveryOutbox,
+    ProcessedEvent,
+    NotificationAudit,
+  ],
   migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
   synchronize: false,
 });

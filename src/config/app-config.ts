@@ -26,6 +26,7 @@ export interface SmtpConfig {
   secure: boolean;
   user: string;
   password: string;
+  timeoutMs: number;
   fromName: string;
   fromAddress: string;
 }
@@ -37,10 +38,12 @@ export interface JwtConfig {
 }
 
 export interface DeliveryConfig {
-  retryCount: number;
+  // Tổng số lần gửi tối đa (gồm lần đầu).
+  maxAttempts: number;
   backoffMs: number;
   sweepIntervalMs: number;
   staleAfterMs: number;
+  outboxRelayIntervalMs: number;
 }
 
 export interface AppConfig {
@@ -91,6 +94,7 @@ export class AppConfigService {
         secure: this.configService.get<boolean>('SMTP_SECURE', false),
         user: this.configService.get<string>('SMTP_USER', ''),
         password: this.configService.get<string>('SMTP_PASSWORD', ''),
+        timeoutMs: this.configService.get<number>('SMTP_TIMEOUT_MS', 5000),
         fromName: this.configService.get<string>('EMAIL_FROM_NAME', 'Taca'),
         fromAddress: this.requireString('EMAIL_FROM_ADDRESS'),
       },
@@ -100,10 +104,11 @@ export class AppConfigService {
         jwksUrl: this.requireString('JWT_JWKS_URL'),
       },
       delivery: {
-        retryCount: this.configService.get<number>('DELIVERY_RETRY_COUNT', 3),
+        maxAttempts: this.configService.get<number>('DELIVERY_RETRY_COUNT', 3),
         backoffMs: this.configService.get<number>('DELIVERY_RETRY_BACKOFF_MS', 2000),
         sweepIntervalMs: this.configService.get<number>('DELIVERY_SWEEP_INTERVAL_MS', 30000),
         staleAfterMs: this.configService.get<number>('DELIVERY_STALE_AFTER_MS', 60000),
+        outboxRelayIntervalMs: this.configService.get<number>('OUTBOX_RELAY_INTERVAL_MS', 5000),
       },
       recipientHashSecret: this.requireString('RECIPIENT_HASH_SECRET'),
       recipientEncryptionSecret: this.requireString('RECIPIENT_ENCRYPTION_SECRET'),
