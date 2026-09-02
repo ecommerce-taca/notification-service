@@ -25,6 +25,10 @@ export class SmtpEmailGateway implements EmailGatewayPort {
       port: smtp.port,
       secure: smtp.secure,
       auth: smtp.user ? { user: smtp.user, pass: smtp.password } : undefined,
+      // Timeout rõ ràng (doc EMAIL_SEND_TIMEOUT) để không giữ notification PROCESSING vô hạn (#10).
+      connectionTimeout: smtp.timeoutMs,
+      greetingTimeout: smtp.timeoutMs,
+      socketTimeout: smtp.timeoutMs,
     });
   }
 

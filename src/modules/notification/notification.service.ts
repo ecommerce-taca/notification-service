@@ -52,6 +52,10 @@ export class NotificationService {
     return this.notificationRepository.updateStatus(id, status, patch);
   }
 
+  tryClaimProcessing(id: string, staleBefore: Date): Promise<boolean> {
+    return this.notificationRepository.tryClaimProcessing(id, staleBefore);
+  }
+
   findPendingDelivery(staleBefore: Date, limit: number): Promise<Notification[]> {
     return this.notificationRepository.findPendingDelivery(staleBefore, limit);
   }

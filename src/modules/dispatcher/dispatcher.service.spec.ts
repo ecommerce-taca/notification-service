@@ -65,7 +65,7 @@ describe('DispatcherService', () => {
   it('should mark in-app as sent without calling provider', async () => {
     const { service, emailGateway } = setup();
     const result = await service.dispatch(makeNotification({ channel: Channel.IN_APP, recipientEncrypted: null }));
-    expect(result).toBe('sent');
+    expect(result).toMatchObject({ outcome: 'sent', provider: 'in_app', providerMessageId: null });
     expect(emailGateway.send).not.toHaveBeenCalled();
   });
 
@@ -75,7 +75,7 @@ describe('DispatcherService', () => {
 
     const result = await service.dispatch(makeNotification());
 
-    expect(result).toBe('skipped');
+    expect(result).toMatchObject({ outcome: 'skipped', provider: 'smtp', providerMessageId: null });
     expect(emailGateway.send).not.toHaveBeenCalled();
   });
 
@@ -92,7 +92,7 @@ describe('DispatcherService', () => {
 
     const result = await service.dispatch(makeNotification({ category: NotificationCategory.SECURITY }));
 
-    expect(result).toBe('sent');
+    expect(result).toMatchObject({ outcome: 'sent', provider: 'smtp', providerMessageId: 'm1' });
     expect(preferenceService.isDisabled).not.toHaveBeenCalled();
     expect(emailGateway.send).toHaveBeenCalled();
   });

@@ -12,13 +12,19 @@ import { RenderedMessage, TemplateService } from '../template/template.service';
 
 const LOCALE = 'vi-VN';
 
-export type DispatchOutcome = 'sent' | 'skipped';
+// Metadata provider do dispatcher trả về — DeliveryService không tự map channel -> provider.
+export interface DispatchResult {
+  outcome: 'sent' | 'skipped';
+  provider: string;
+  providerMessageId: string | null;
+}
 
-// Lỗi gửi email — mang retryable để delivery service quyết định retry.
+// Lỗi gửi email — mang retryable + provider để DeliveryService quyết định retry và ghi attempt.
 export class DeliverySendError extends Error {
   constructor(
     readonly errorCode: string,
     readonly retryable: boolean,
+    readonly provider: string,
   ) {
     super(`delivery send failed: ${errorCode}`);
     this.name = 'DeliverySendError';
@@ -35,14 +41,16 @@ export class DispatcherService {
     private readonly config: AppConfigService,
   ) {}
 
-  async dispatch(notification: Notification): Promise<DispatchOutcome> {
+  async dispatch(notification: Notification): Promise<DispatchResult> {
+    const provider = this.providerFor(notification.channel);
+
     if (notification.channel === Channel.IN_APP) {
       // In-app đã được persist sẵn; "gửi" chỉ là đánh dấu sẵn sàng.
-      return 'sent';
+      return { outcome: 'sent', provider, providerMessageId: null };
     }
 
     if (await this.shouldSkip(notification)) {
-      return 'skipped';
+      return { outcome: 'skipped', provider, providerMessageId: null };
     }
 
     if (!notification.recipientEncrypted) {
@@ -55,9 +63,13 @@ export class DispatcherService {
     const rendered = await this.renderMessage(notification);
     const result = await this.emailGateway.send({ to: recipient, subject: rendered.title, html: rendered.body });
     if (!result.success) {
-      throw new DeliverySendError(result.errorCode ?? 'SMTP_UNKNOWN', result.retryable);
+      throw new DeliverySendError(result.errorCode ?? 'SMTP_UNKNOWN', result.retryable, provider);
     }
-    return 'sent';
+    return { outcome: 'sent', provider, providerMessageId: result.providerMessageId };
+  }
+
+  providerFor(channel: Channel): string {
+    return channel === Channel.EMAIL ? 'smtp' : 'in_app';
   }
 
   private async shouldSkip(notification: Notification): Promise<boolean> {

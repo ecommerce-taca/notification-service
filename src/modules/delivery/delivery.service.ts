@@ -5,13 +5,13 @@ import { RequestContext } from '../../common/http/request-context';
 import { DeliveryAttempt } from '../../domain/entities/delivery-attempt.entity';
 import { Notification } from '../../domain/entities/notification.entity';
 import { AttemptStatus } from '../../domain/enums/attempt-status.enum';
-import { Channel } from '../../domain/enums/channel.enum';
 import { NotificationStatus } from '../../domain/enums/notification-status.enum';
 import { Clock } from '../../domain/ports/clock.port';
 import { DeliveryAttemptRepositoryPort } from '../../domain/ports/delivery-attempt.repository.port';
-import { DeliveryOutcome, EventPublisherPort } from '../../domain/ports/event-publisher.port';
+import { DeliveryOutboxRepositoryPort } from '../../domain/ports/delivery-outbox.repository.port';
+import { DeliveryStatusEvent } from '../../domain/ports/event-publisher.port';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
-import { DeliverySendError, DispatcherService } from '../dispatcher/dispatcher.service';
+import { DeliverySendError, DispatchResult, DispatcherService } from '../dispatcher/dispatcher.service';
 import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
@@ -20,7 +20,7 @@ export class DeliveryService {
     private readonly dispatcher: DispatcherService,
     private readonly notificationService: NotificationService,
     private readonly deliveryAttemptRepository: DeliveryAttemptRepositoryPort,
-    private readonly eventPublisher: EventPublisherPort,
+    private readonly deliveryOutboxRepository: DeliveryOutboxRepositoryPort,
     private readonly idGenerator: IdGenerator,
     private readonly clock: Clock,
     private readonly config: AppConfigService,
@@ -28,70 +28,139 @@ export class DeliveryService {
   ) {}
 
   async dispatch(notificationId: string): Promise<void> {
+    const staleBefore = new Date(this.clock.now().getTime() - this.config.config.delivery.staleAfterMs);
+
+    // Atomic claim chống race: nhiều worker claim cùng notification chỉ 1 thắng (#3/#4/#5).
+    const claimed = await this.notificationService.tryClaimProcessing(notificationId, staleBefore);
+    if (!claimed) return;
+
     const notification = await this.notificationService.findById(notificationId);
     if (!notification) return;
-    if (notification.status === NotificationStatus.SENT || notification.status === NotificationStatus.SKIPPED) {
-      return;
-    }
 
-    await this.notificationService.updateStatus(notificationId, NotificationStatus.PROCESSING);
+    const maxAttempts = this.config.config.delivery.maxAttempts;
+    // attempt_no đơn điệu qua các lần dispatch/reclaim (#6).
+    let attemptNo = (await this.deliveryAttemptRepository.findLastAttemptNo(notificationId)) + 1;
 
-    const maxAttempts = this.config.config.delivery.retryCount;
-    for (let attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
-      const attemptStartedAt = this.clock.now();
+    for (; attemptNo <= maxAttempts; attemptNo++) {
+      const startedAt = this.clock.now();
+
+      // Error boundary của provider tách riêng: lỗi DB/outbox phía dưới không lọt vào đây (#1).
+      let result: DispatchResult;
       try {
-        const outcome = await this.dispatcher.dispatch(notification);
-        await this.recordAttempt(notification, attemptNo, AttemptStatus.SENT, null, attemptStartedAt);
-
-        if (outcome === 'skipped') {
-          await this.notificationService.updateStatus(notificationId, NotificationStatus.SKIPPED);
-          return;
-        }
-
-        await this.notificationService.updateStatus(notificationId, NotificationStatus.SENT, {
-          sentAt: this.clock.now(),
-        });
-        await this.publishDeliveryStatus(notification, 'delivered', null);
-        return;
+        result = await this.dispatcher.dispatch(notification);
       } catch (err) {
         if (err instanceof DeliverySendError) {
-          const isLastAttempt = attemptNo === maxAttempts;
-          if (err.retryable && !isLastAttempt) {
-            await this.recordAttempt(notification, attemptNo, AttemptStatus.RETRYABLE_FAILED, err.errorCode, attemptStartedAt);
-            await this.sleep(this.config.config.delivery.backoffMs);
+          if (err.retryable && attemptNo < maxAttempts) {
+            await this.saveAttempt(
+              notification, attemptNo, AttemptStatus.RETRYABLE_FAILED, err.provider, null, err.errorCode, startedAt,
+            );
+            await this.sleep(this.backoffMs(attemptNo));
             continue;
           }
-          await this.recordAttempt(notification, attemptNo, AttemptStatus.PERMANENT_FAILED, err.errorCode, attemptStartedAt);
-          await this.fail(notification, err.errorCode);
+          const status = err.retryable ? AttemptStatus.RETRY_EXHAUSTED : AttemptStatus.PERMANENT_FAILED;
+          await this.finalizeFailed(notification, attemptNo, status, err.provider, err.errorCode, startedAt);
           return;
         }
-
-        // Lỗi ngoài dự kiến (DB/template/validate) — không retry vô ích.
+        // Lỗi ngoài dự kiến (template/validate) — không retry vô ích.
         this.logger.error('delivery failed unexpectedly', err, { event: 'delivery.error', notificationId });
-        await this.recordAttempt(notification, attemptNo, AttemptStatus.PERMANENT_FAILED, 'INTERNAL_ERROR', attemptStartedAt);
-        await this.fail(notification, 'INTERNAL_ERROR');
+        await this.finalizeFailed(
+          notification, attemptNo, AttemptStatus.PERMANENT_FAILED,
+          this.dispatcher.providerFor(notification.channel), 'INTERNAL_ERROR', startedAt,
+        );
         return;
       }
+
+      // Provider đã xử lý xong (sent/skipped). Từ đây lỗi DB KHÔNG được flip FAILED (#1/#2).
+      if (result.outcome === 'skipped') {
+        // Ưu tiên chốt terminal SKIPPED trước để không bị reclaim lại, rồi mới ghi attempt.
+        await this.notificationService.updateStatus(notificationId, NotificationStatus.SKIPPED);
+        await this.saveAttempt(notification, attemptNo, AttemptStatus.SKIPPED, result.provider, null, null, startedAt);
+        return;
+      }
+
+      await this.finalizeSent(notification, attemptNo, result, startedAt);
+      return;
     }
   }
 
-  // Admin cần attempt theo danh sách notification để dựng view deliveries; đây là read duy nhất
-  // của DeliveryAttempt nằm ngoài chính service này (service khác đi qua đây, không chạm repo).
-  async findAttemptsByNotificationIds(notificationIds: string[]): Promise<DeliveryAttempt[]> {
-    return this.deliveryAttemptRepository.findByNotificationIds(notificationIds);
-  }
-
-  private async fail(notification: Notification, errorCode: string): Promise<void> {
-    await this.notificationService.updateStatus(notification.id, NotificationStatus.FAILED);
-    await this.publishDeliveryStatus(notification, 'failed', errorCode);
-  }
-
-  private async publishDeliveryStatus(
+  private async finalizeSent(
     notification: Notification,
-    outcome: DeliveryOutcome,
-    errorCode: string | null,
+    attemptNo: number,
+    result: DispatchResult,
+    startedAt: Date,
   ): Promise<void> {
-    await this.eventPublisher.publishDeliveryStatus({
+    const attempt = this.buildAttempt(notification, attemptNo, AttemptStatus.SENT, result.provider, result.providerMessageId, null, startedAt);
+    const event = this.buildEvent(notification, 'delivered', null);
+    try {
+      await this.deliveryOutboxRepository.recordSent(notification.id, this.clock.now(), attempt, event);
+    } catch (err) {
+      // Provider đã gửi thành công; lỗi DB ở đây KHÔNG được chuyển FAILED (#1/#2). Notification giữ
+      // PROCESSING, lease hết hạn sẽ reclaim → gửi lại (at-least-once, đúng doc).
+      this.logger.error('delivery sent but finalize failed', err, { event: 'delivery.finalize_failed', notificationId: notification.id });
+    }
+  }
+
+  private async finalizeFailed(
+    notification: Notification,
+    attemptNo: number,
+    status: AttemptStatus,
+    provider: string,
+    errorCode: string,
+    startedAt: Date,
+  ): Promise<void> {
+    const attempt = this.buildAttempt(notification, attemptNo, status, provider, null, errorCode, startedAt);
+    const event = this.buildEvent(notification, 'failed', errorCode);
+    try {
+      await this.deliveryOutboxRepository.recordFailed(notification.id, attempt, event);
+    } catch (err) {
+      this.logger.error('delivery failed but finalize failed', err, { event: 'delivery.finalize_failed', notificationId: notification.id });
+    }
+  }
+
+  private async saveAttempt(
+    notification: Notification,
+    attemptNo: number,
+    status: AttemptStatus,
+    provider: string,
+    providerMessageId: string | null,
+    errorCode: string | null,
+    startedAt: Date,
+  ): Promise<void> {
+    await this.deliveryAttemptRepository.save(
+      this.buildAttempt(notification, attemptNo, status, provider, providerMessageId, errorCode, startedAt),
+    );
+  }
+
+  private buildAttempt(
+    notification: Notification,
+    attemptNo: number,
+    status: AttemptStatus,
+    provider: string,
+    providerMessageId: string | null,
+    errorCode: string | null,
+    startedAt: Date,
+  ): DeliveryAttempt {
+    const attempt = new DeliveryAttempt();
+    attempt.id = this.idGenerator.generate();
+    attempt.notificationId = notification.id;
+    attempt.attemptNo = attemptNo;
+    attempt.provider = provider;
+    attempt.status = status;
+    attempt.providerMessageId = providerMessageId;
+    attempt.errorCode = errorCode;
+    attempt.startedAt = startedAt;
+    attempt.finishedAt = this.clock.now();
+    attempt.traceId = RequestContext.getTraceId() ?? null;
+    attempt.requestId = RequestContext.getRequestId() ?? null;
+    return attempt;
+  }
+
+  private buildEvent(
+    notification: Notification,
+    outcome: 'delivered' | 'failed',
+    errorCode: string | null,
+  ): DeliveryStatusEvent {
+    return {
       eventId: this.idGenerator.generate(),
       outcome,
       dedupeKey: notification.dedupeKey,
@@ -100,33 +169,20 @@ export class DeliveryService {
       templateKey: notification.templateKey,
       errorCode,
       occurredAt: this.clock.now().toISOString(),
-    });
+    };
   }
 
-  private async recordAttempt(
-    notification: Notification,
-    attemptNo: number,
-    status: AttemptStatus,
-    errorCode: string | null,
-    startedAt: Date,
-  ): Promise<void> {
-    const attempt = new DeliveryAttempt();
-    attempt.id = this.idGenerator.generate();
-    attempt.notificationId = notification.id;
-    attempt.attemptNo = attemptNo;
-    attempt.provider = this.providerFor(notification.channel);
-    attempt.status = status;
-    attempt.providerMessageId = null;
-    attempt.errorCode = errorCode;
-    attempt.startedAt = startedAt;
-    attempt.finishedAt = this.clock.now();
-    attempt.traceId = RequestContext.getTraceId() ?? null;
-    attempt.requestId = RequestContext.getRequestId() ?? null;
-    await this.deliveryAttemptRepository.save(attempt);
+  // Admin cần attempt theo danh sách notification để dựng view deliveries; read duy nhất ngoài service.
+  async findAttemptsByNotificationIds(notificationIds: string[]): Promise<DeliveryAttempt[]> {
+    return this.deliveryAttemptRepository.findByNotificationIds(notificationIds);
   }
 
-  private providerFor(channel: Channel): string {
-    return channel === Channel.EMAIL ? 'smtp' : 'in_app';
+  // Exponential backoff + jitter để tránh thundering herd khi provider outage (#11).
+  private backoffMs(attemptNo: number): number {
+    const base = this.config.config.delivery.backoffMs;
+    const exponential = Math.min(base * Math.pow(2, attemptNo - 1), 30_000);
+    const jitter = Math.floor(Math.random() * base);
+    return exponential + jitter;
   }
 
   private sleep(ms: number): Promise<void> {
