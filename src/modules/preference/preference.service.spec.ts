@@ -1,6 +1,5 @@
 import { PreferenceService } from './preference.service';
 import { PreferenceRepositoryPort } from '../../domain/ports/preference.repository.port';
-import { Clock } from '../../domain/ports/clock.port';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
 import { NotificationPreference } from '../../domain/entities/notification-preference.entity';
 import { Channel } from '../../domain/enums/channel.enum';
@@ -35,8 +34,7 @@ describe('PreferenceService', () => {
       save: jest.fn(),
     } as jest.Mocked<PreferenceRepositoryPort>;
     idGenerator = { generate: jest.fn().mockReturnValue('pref-new') } as jest.Mocked<IdGenerator>;
-    const clock = { now: jest.fn().mockReturnValue(new Date('2026-09-01T00:00:00Z')) } as jest.Mocked<Clock>;
-    service = new PreferenceService(repo, idGenerator, clock);
+    service = new PreferenceService(repo, idGenerator);
   });
 
   it('should reject disabling SECURITY category', async () => {

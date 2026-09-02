@@ -5,16 +5,21 @@ import { NotificationPreference } from '../../domain/entities/notification-prefe
 import { Channel } from '../../domain/enums/channel.enum';
 import { NotificationCategory } from '../../domain/enums/category.enum';
 import { PreferenceStatus } from '../../domain/enums/preference-status.enum';
-import { Clock } from '../../domain/ports/clock.port';
 import { IdGenerator } from '../../domain/ports/id-generator.port';
 import { PreferenceRepositoryPort } from '../../domain/ports/preference.repository.port';
+
+interface NewPreferenceInput {
+  userId: string;
+  channel: Channel;
+  category: NotificationCategory;
+  status: PreferenceStatus;
+}
 
 @Injectable()
 export class PreferenceService {
   constructor(
     private readonly preferenceRepository: PreferenceRepositoryPort,
     private readonly idGenerator: IdGenerator,
-    private readonly clock: Clock,
   ) {}
 
   async list(userId: string): Promise<NotificationPreference[]> {
@@ -41,16 +46,21 @@ export class PreferenceService {
       return this.preferenceRepository.save(existing);
     }
 
+    return this.preferenceRepository.save(this.buildNewPreference({ userId, channel, category, status }));
+  }
+
+  // Dựng row preference mới với các invariant lúc tạo: version bắt đầu từ 1, `locked` suy ra từ
+  // category. `updatedAt` để cột @UpdateDateColumn tự set khi save — gán tay ở đây sẽ lệch với mốc DB.
+  private buildNewPreference(input: NewPreferenceInput): NotificationPreference {
     const preference = new NotificationPreference();
     preference.id = this.idGenerator.generate();
-    preference.userId = userId;
-    preference.channel = channel;
-    preference.category = category;
-    preference.status = status;
-    preference.locked = this.isLockedCategory(category);
+    preference.userId = input.userId;
+    preference.channel = input.channel;
+    preference.category = input.category;
+    preference.status = input.status;
+    preference.locked = this.isLockedCategory(input.category);
     preference.version = 1;
-    preference.updatedAt = this.clock.now();
-    return this.preferenceRepository.save(preference);
+    return preference;
   }
 
   // Trả về true nếu channel+category này bị user tắt (không có row = mặc định bật).
