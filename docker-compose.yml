@@ -1,0 +1,124 @@
+# Local dev stack cho notification-service: MySQL 8 + Kafka (KRaft) + Mailhog + mock-jwks + migrate + app.
+# Chỉ dùng cho local/dev — KHÔNG dùng làm cấu hình production.
+# Secret + cấu hình email nằm trong file .env (gitignored), nạp qua env_file.
+
+x-app-env: &app-env
+  NODE_ENV: development
+  PORT: "8080"
+  SERVICE_NAME: notification-service
+  SERVICE_VERSION: 0.1.0
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_USERNAME: notification
+  DB_NAME: notificationdb
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_CLIENT_ID: notification-service
+  KAFKA_CONSUMER_GROUP_ID: notification-service
+  KAFKA_TOPIC_COMMANDS: notification.commands.v1
+  KAFKA_TOPIC_DOMAIN_EVENTS: order.events.v1,invoice.events.v1,shipment.events.v1,payment.events.v1,wallet.events.v1
+  KAFKA_TOPIC_DELIVERED: notification.delivered.v1
+  KAFKA_TOPIC_FAILED: notification.failed.v1
+  KAFKA_TOPIC_DLQ: notification.events.dlq.v1
+  EMAIL_FROM_NAME: Taca
+  JWT_ISSUER: https://auth.taca.vn
+  JWT_AUDIENCE: taca-api
+  JWT_JWKS_URL: http://mock-jwks/.well-known/jwks.json
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: notificationdb
+      MYSQL_USER: notification
+      MYSQL_PASSWORD: notification
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:3.7.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # UI xem email bắt được
+
+  # Mock auth-user: serve JWKS tĩnh để verify test-JWT (thay cho auth-user thật ở local).
+  mock-jwks:
+    image: nginx:alpine
+    volumes:
+      - ./scripts/mock-auth/.well-known:/usr/share/nginx/html/.well-known:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/.well-known/jwks.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Tạo sẵn các topic trước khi consumer subscribe (auto-create chỉ chạy khi produce, không phải subscribe).
+  kafka-init:
+    image: apache/kafka:3.7.1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.commands.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic order.events.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic invoice.events.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic shipment.events.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic payment.events.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic wallet.events.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.delivered.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.failed.v1 --partitions 1 --replication-factor 1 && /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic notification.events.dlq.v1 --partitions 1 --replication-factor 1"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Chạy migration + seed một lần (dùng builder stage có sẵn source + ts-node).
+  migrate:
+    build:
+      context: .
+      target: builder
+    environment: *app-env
+    env_file: .env
+    command: sh -c "npm run migration:run && npm run seed"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  app:
+    build: .
+    environment: *app-env
+    env_file: .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      mock-jwks:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
