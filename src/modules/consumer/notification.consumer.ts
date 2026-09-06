@@ -72,7 +72,9 @@ export class NotificationConsumer {
 
       const result = await this.ingest({
         recipientUserId: command.user_id,
-        recipient: command.recipient || null,
+        // recipient_encrypted phải null với IN_APP (db/notification.md §3.1) — chỉ giữ recipient
+        // (email) khi channel thật sự cần gửi ra ngoài (EMAIL).
+        recipient: command.channel === Channel.EMAIL ? (command.recipient || null) : null,
         channel: command.channel,
         templateKey: template.key,
         templateVersion: template.version,
@@ -106,6 +108,12 @@ export class NotificationConsumer {
 
       const template = await this.templateService.resolveByKey(mapping.template, LOCALE);
       const recipient = extractRecipient(event.payload);
+      if (recipient.usedFallback) {
+        this.logger.warn('extractRecipient fallback used, payload không đúng field đã chốt', {
+          event: 'consumer.recipient_fallback',
+          eventType: event.event_type,
+        });
+      }
       if (!recipient.userId) {
         throw new AppException(ErrorCode.NOTIFICATION_INVALID_INPUT, {
           context: { eventType: event.event_type, eventId: event.event_id },
