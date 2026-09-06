@@ -58,6 +58,12 @@ export class DeliveryOutboxTypeOrmRepository implements DeliveryOutboxRepository
     await this.dataSource.getRepository(DeliveryOutbox).update(id, { publishedAt: new Date() });
   }
 
+  // Atomic UPDATE ... SET retry_count = retry_count + 1 ở DB — không đọc record lên rồi ghi lại,
+  // tránh mất update khi nhiều relay worker cùng tăng retry_count trên 1 record (race condition).
+  async incrementRetryCount(id: string): Promise<void> {
+    await this.dataSource.getRepository(DeliveryOutbox).increment({ id }, 'retryCount', 1);
+  }
+
   private toEntity(event: DeliveryStatusEvent): DeliveryOutbox {
     const outbox = new DeliveryOutbox();
     outbox.id = event.eventId;

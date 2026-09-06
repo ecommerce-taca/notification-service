@@ -20,4 +20,9 @@ export abstract class DeliveryOutboxRepositoryPort {
 
   abstract findUnpublished(limit: number): Promise<DeliveryOutbox[]>;
   abstract markPublished(id: string): Promise<void>;
+
+  // Gọi khi relay publish Kafka thất bại (xem DeliveryOutboxRelayService.relay). Phải atomic
+  // (increment tại DB) — không đọc rồi ghi lại cả record, tránh mất update khi nhiều relay
+  // worker cùng chạy song song trên cùng 1 outbox record.
+  abstract incrementRetryCount(id: string): Promise<void>;
 }
