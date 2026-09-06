@@ -66,7 +66,7 @@ function setup() {
     config,
     logger,
   );
-  return { consumer, notificationService, processedEventRepository, deliveryService };
+  return { consumer, notificationService, processedEventRepository, deliveryService, logger };
 }
 
 describe('NotificationConsumer', () => {
@@ -104,5 +104,55 @@ describe('NotificationConsumer', () => {
 
     expect(processedEventRepository.save).toHaveBeenCalled();
     expect(deliveryService.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('should extract recipient từ payload.buyer (field đã chốt) và không log fallback warning', async () => {
+    const { consumer, notificationService, logger } = setup();
+    const event: DomainEvent = {
+      event_id: 'evt-3',
+      schema_version: 1,
+      event_type: 'order.paid',
+      occurred_at: '2026-09-01T00:00:00Z',
+      payload: { buyer: { user_id: 'user-1', email: 'buyer@example.com' }, order_id: 'order-1' },
+    };
+
+    await consumer.handleDomainEvent(event, {});
+
+    expect(notificationService.save).toHaveBeenCalled();
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('should log warning nhưng vẫn ingest được khi payload dùng field fallback (chưa đúng field đã chốt)', async () => {
+    const { consumer, notificationService, logger } = setup();
+    const event: DomainEvent = {
+      event_id: 'evt-4',
+      schema_version: 1,
+      event_type: 'order.paid',
+      occurred_at: '2026-09-01T00:00:00Z',
+      payload: { user_id: 'user-1', email: 'buyer@example.com', order_id: 'order-1' },
+    };
+
+    await consumer.handleDomainEvent(event, {});
+
+    expect(notificationService.save).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      'extractRecipient fallback used, payload không đúng field đã chốt',
+      expect.objectContaining({ eventType: 'order.paid' }),
+    );
+  });
+
+  it('should null hoá recipientEncrypted/recipientHash khi command channel=IN_APP dù recipient khác rỗng', async () => {
+    const { consumer, notificationService } = setup();
+    const command: NotificationCommand = {
+      ...COMMAND,
+      channel: Channel.IN_APP,
+      recipient: 'buyer@example.com',
+    };
+
+    await consumer.handleCommand(command, {});
+
+    const saved = notificationService.save.mock.calls[0][0];
+    expect(saved.recipientEncrypted).toBeNull();
+    expect(saved.recipientHash).toBeNull();
   });
 });

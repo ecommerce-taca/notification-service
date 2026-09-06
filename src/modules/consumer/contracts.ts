@@ -136,16 +136,32 @@ export const COMMAND_CATEGORY: Record<(typeof COMMAND_TYPES)[number], Notificati
 export interface ExtractedRecipient {
   userId: string | null;
   email: string | null;
+  // true nếu payload không dùng field đã chốt (buyer.user_id/buyer.email) và phải rơi vào
+  // fallback — caller (NotificationConsumer) log warning khi cờ này bật.
+  usedFallback: boolean;
 }
 
-// Rút recipient từ payload domain event. Tên field thật của producer phải align với
-// một trong các dạng dưới (xem báo cáo — đây là điểm cần reconcile với producer).
+// Rút recipient từ payload domain event. Field đã chốt (order-commerce.md §6.1):
+// payload.buyer.user_id (bắt buộc) / payload.buyer.email (optional). Các dạng tên khác chỉ còn
+// là fallback tạm thời cho tới khi producer thật align đúng field đã chốt.
 export function extractRecipient(payload: Record<string, unknown>): ExtractedRecipient {
+  const buyer = payload.buyer as { user_id?: unknown; email?: unknown } | undefined;
+  if (buyer && typeof buyer.user_id === 'string') {
+    return {
+      userId: buyer.user_id,
+      email: typeof buyer.email === 'string' ? buyer.email : null,
+      usedFallback: false,
+    };
+  }
+
+  // Fallback: giữ lại các dạng tên cũ để không reject toàn bộ event nếu producer thật chưa kịp
+  // đổi, nhưng caller phải log warning rõ ràng — để lộ ra ngay thay vì âm thầm chấp nhận mãi mãi.
   const recipient = payload.recipient as { user_id?: unknown; email?: unknown } | undefined;
   if (recipient && typeof recipient.user_id === 'string') {
     return {
       userId: recipient.user_id,
       email: typeof recipient.email === 'string' ? recipient.email : null,
+      usedFallback: true,
     };
   }
   const userId = payload.user_id ?? payload.buyer_id ?? payload.recipient_user_id;
@@ -153,6 +169,7 @@ export function extractRecipient(payload: Record<string, unknown>): ExtractedRec
   return {
     userId: typeof userId === 'string' ? userId : null,
     email: typeof email === 'string' ? email : null,
+    usedFallback: true,
   };
 }
 
