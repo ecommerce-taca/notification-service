@@ -14,6 +14,7 @@ import { ReferenceType } from '../enums/reference-type.enum';
 @Index('idx_notifications_recipient_read_created', ['recipientUserId', 'readStatus', 'createdAt'])
 @Index('idx_notifications_status_scheduled', ['status', 'scheduledAt'])
 @Index('idx_notifications_recipient_hash', ['recipientHash'])
+@Index('idx_notifications_status_processing', ['status', 'processingStartedAt'])
 export class Notification {
   @PrimaryColumn({ name: '_id', type: 'varchar', length: 36 })
   id: string;
@@ -64,6 +65,10 @@ export class Notification {
 
   @Column({ name: 'scheduled_at', type: 'datetime', precision: 6, nullable: true })
   scheduledAt: Date | null;
+
+  // Lease xử lý: đặt khi worker claim PROCESSING; sweeper chỉ reclaim khi lease đã quá staleBefore.
+  @Column({ name: 'processing_started_at', type: 'datetime', precision: 6, nullable: true })
+  processingStartedAt: Date | null;
 
   @Column({ name: 'sent_at', type: 'datetime', precision: 6, nullable: true })
   sentAt: Date | null;

@@ -45,6 +45,9 @@ export abstract class NotificationRepositoryPort {
   abstract markRead(id: string, recipientUserId: string): Promise<void>;
   abstract markAllRead(recipientUserId: string, before: Date | null): Promise<number>;
   abstract updateStatus(id: string, status: NotificationStatus, patch?: NotificationStatusPatch): Promise<void>;
+  // Atomic claim: chỉ claim khi còn QUEUED, hoặc PROCESSING nhưng lease đã hết hạn (processingStartedAt < staleBefore).
+  // Trả true nếu claim được (1 row bị update), false nếu worker khác đã claim / đã terminal.
+  abstract tryClaimProcessing(id: string, staleBefore: Date): Promise<boolean>;
   abstract findPendingDelivery(staleBefore: Date, limit: number): Promise<Notification[]>;
   abstract findDeliveries(query: DeliveryQuery): Promise<NotificationPagedResult>;
 }

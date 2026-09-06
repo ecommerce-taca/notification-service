@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Notification } from '../../../domain/entities/notification.entity';
 import { Channel } from '../../../domain/enums/channel.enum';
 import { NotificationStatus } from '../../../domain/enums/notification-status.enum';
@@ -95,15 +95,36 @@ export class NotificationTypeOrmRepository implements NotificationRepositoryPort
     await this.repo.update({ id }, { status, ...patch });
   }
 
+  async tryClaimProcessing(id: string, staleBefore: Date): Promise<boolean> {
+    // Atomic claim chống race: nhiều worker cùng claim chỉ 1 thắng. QUEUED luôn claim được;
+    // PROCESSING chỉ claim được khi lease đã hết hạn (processing_started_at cũ hơn staleBefore).
+    const result = await this.repo
+      .createQueryBuilder()
+      .update()
+      .set({ status: NotificationStatus.PROCESSING, processingStartedAt: new Date() })
+      .where('_id = :id', { id })
+      .andWhere('(status = :queued OR (status = :processing AND processing_started_at < :staleBefore))', {
+        queued: NotificationStatus.QUEUED,
+        processing: NotificationStatus.PROCESSING,
+        staleBefore,
+      })
+      .execute();
+    return (result.affected ?? 0) > 0;
+  }
+
   async findPendingDelivery(staleBefore: Date, limit: number): Promise<Notification[]> {
-    return this.repo.find({
-      where: {
-        status: In([NotificationStatus.QUEUED, NotificationStatus.PROCESSING]),
-        updatedAt: LessThan(staleBefore),
-      },
-      order: { createdAt: 'ASC' },
-      take: limit,
-    });
+    // Ứng viên cần re-dispatch: QUEUED bị kẹt (crash sau persist) hoặc PROCESSING có lease hết hạn.
+    // Claim thật vẫn do tryClaimProcessing gate — ở đây chỉ lọc ứng viên.
+    return this.repo
+      .createQueryBuilder('n')
+      .where(
+        '(n.status = :queued AND n.updated_at < :staleBefore) OR ' +
+          '(n.status = :processing AND (n.processing_started_at < :staleBefore OR n.processing_started_at IS NULL))',
+        { queued: NotificationStatus.QUEUED, processing: NotificationStatus.PROCESSING, staleBefore },
+      )
+      .orderBy('n.created_at', 'ASC')
+      .take(limit)
+      .getMany();
   }
 
   async findDeliveries(query: DeliveryQuery): Promise<NotificationPagedResult> {

@@ -14,6 +14,7 @@ export interface DeliveryStatusEvent {
 }
 
 // Notification phát kết quả delivery async (notification.delivered.v1 / notification.failed.v1).
+// Throw khi publish thất bại — để outbox relay biết chưa publish được mà giữ lại retry sau.
 export abstract class EventPublisherPort {
   abstract publishDeliveryStatus(event: DeliveryStatusEvent): Promise<void>;
 }
