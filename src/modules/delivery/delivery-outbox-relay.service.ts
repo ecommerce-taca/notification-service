@@ -35,6 +35,7 @@ export class DeliveryOutboxRelayService implements OnModuleInit, OnModuleDestroy
         await this.eventPublisher.publishDeliveryStatus(event.payload);
         await this.outboxRepository.markPublished(event.id);
       } catch (err) {
+        await this.outboxRepository.incrementRetryCount(event.id);
         this.logger.warn('outbox relay publish failed', {
           event: 'delivery.outbox_publish_failed',
           outboxId: event.id,

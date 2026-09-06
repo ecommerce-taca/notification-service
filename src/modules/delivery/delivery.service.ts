@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AppConfigService } from '../../config/app-config';
 import { AppLogger } from '../../common/logging/app.logger';
 import { RequestContext } from '../../common/http/request-context';
+import { ErrorCode } from '../../common/errors/error-code';
 import { DeliveryAttempt } from '../../domain/entities/delivery-attempt.entity';
 import { Notification } from '../../domain/entities/notification.entity';
 import { AttemptStatus } from '../../domain/enums/attempt-status.enum';
@@ -41,6 +42,21 @@ export class DeliveryService {
     // attempt_no đơn điệu qua các lần dispatch/reclaim (#6).
     let attemptNo = (await this.deliveryAttemptRepository.findLastAttemptNo(notificationId)) + 1;
 
+    if (attemptNo > maxAttempts) {
+      // Đã hết budget retry từ trước khi vào lần dispatch này (vd reclaim sau khi exhausted ở lần
+      // trước) — vòng for dưới sẽ không chạy lần nào, phải chủ động chốt terminal ở đây, không được
+      // để notification bị claim (PROCESSING) mà không ghi nhận kết quả nào.
+      await this.finalizeFailed(
+        notification,
+        attemptNo,
+        AttemptStatus.RETRY_EXHAUSTED,
+        this.dispatcher.providerFor(notification.channel),
+        ErrorCode.NOTIFICATION_DELIVERY_FAILED,
+        this.clock.now(),
+      );
+      return;
+    }
+
     for (; attemptNo <= maxAttempts; attemptNo++) {
       const startedAt = this.clock.now();
 
@@ -65,7 +81,7 @@ export class DeliveryService {
         this.logger.error('delivery failed unexpectedly', err, { event: 'delivery.error', notificationId });
         await this.finalizeFailed(
           notification, attemptNo, AttemptStatus.PERMANENT_FAILED,
-          this.dispatcher.providerFor(notification.channel), 'INTERNAL_ERROR', startedAt,
+          this.dispatcher.providerFor(notification.channel), ErrorCode.NOTIFICATION_INTERNAL_ERROR, startedAt,
         );
         return;
       }

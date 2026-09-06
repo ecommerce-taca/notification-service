@@ -12,6 +12,7 @@ import { Channel } from '../../domain/enums/channel.enum';
 import { NotificationCategory } from '../../domain/enums/category.enum';
 import { NotificationStatus } from '../../domain/enums/notification-status.enum';
 import { AttemptStatus } from '../../domain/enums/attempt-status.enum';
+import { ErrorCode } from '../../common/errors/error-code';
 
 function makeNotification(status: NotificationStatus): Notification {
   const notification = new Notification();
@@ -147,6 +148,38 @@ describe('DeliveryService', () => {
     expect(deliveryOutboxRepository.recordFailed).toHaveBeenCalledTimes(1);
     const [, attempt] = deliveryOutboxRepository.recordFailed.mock.calls[0];
     expect(attempt.status).toBe(AttemptStatus.PERMANENT_FAILED);
+  });
+
+  it('should finalize RETRY_EXHAUSTED without dispatching when attemptNo already exceeds maxAttempts on entry', async () => {
+    const { service, dispatcher, notificationService, deliveryAttemptRepository, deliveryOutboxRepository } = setup(3);
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.PROCESSING));
+    // Lease hết hạn bị reclaim khi budget đã hết từ lần dispatch trước (attempt 1-3 đã ghi nhận).
+    deliveryAttemptRepository.findLastAttemptNo.mockResolvedValue(3);
+
+    await service.dispatch('ntf-1');
+
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+    expect(deliveryOutboxRepository.recordFailed).toHaveBeenCalledTimes(1);
+    const [notificationId, attempt, event] = deliveryOutboxRepository.recordFailed.mock.calls[0];
+    expect(notificationId).toBe('ntf-1');
+    expect(attempt.attemptNo).toBe(4);
+    expect(attempt.status).toBe(AttemptStatus.RETRY_EXHAUSTED);
+    expect(attempt.errorCode).toBe(ErrorCode.NOTIFICATION_DELIVERY_FAILED);
+    expect(event.outcome).toBe('failed');
+  });
+
+  it('should use ErrorCode.NOTIFICATION_INTERNAL_ERROR for unexpected non-delivery errors', async () => {
+    const { service, dispatcher, notificationService, deliveryOutboxRepository, logger } = setup();
+    notificationService.findById.mockResolvedValue(makeNotification(NotificationStatus.QUEUED));
+    dispatcher.dispatch.mockRejectedValue(new Error('template render crashed'));
+
+    await service.dispatch('ntf-1');
+
+    expect(deliveryOutboxRepository.recordFailed).toHaveBeenCalledTimes(1);
+    const [, attempt] = deliveryOutboxRepository.recordFailed.mock.calls[0];
+    expect(attempt.status).toBe(AttemptStatus.PERMANENT_FAILED);
+    expect(attempt.errorCode).toBe(ErrorCode.NOTIFICATION_INTERNAL_ERROR);
+    expect(logger.error).toHaveBeenCalled();
   });
 
   it('should not dispatch when claim fails (another worker claimed)', async () => {
