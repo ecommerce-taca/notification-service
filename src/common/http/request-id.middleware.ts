@@ -25,14 +25,21 @@ function resolveTraceId(header: unknown): string | undefined {
   return parts[1] || undefined;
 }
 
+function resolveSpanId(header: unknown): string | undefined {
+  if (typeof header !== 'string') return undefined;
+  const parts = header.split('-');
+  return parts.length === 4 ? parts[2] || undefined : undefined;
+}
+
 @Injectable()
 export class RequestIdMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     const requestId = resolveRequestId(req.headers['x-request-id']);
     const traceId = resolveTraceId(req.headers['traceparent']);
+    const spanId = resolveSpanId(req.headers['traceparent']);
 
     res.setHeader('X-Request-ID', requestId);
 
-    RequestContext.run({ requestId, traceId }, () => next());
+    RequestContext.run({ requestId, traceId, spanId }, () => next());
   }
 }

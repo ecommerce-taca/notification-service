@@ -42,7 +42,7 @@ export class AppLogger implements LoggerService {
       version: this.config.config.serviceVersion,
       event: context?.event ?? 'log',
       trace_id: ctx?.traceId ?? null,
-      span_id: null,
+      span_id: ctx?.spanId ?? null,
       request_id: ctx?.requestId ?? null,
       message,
     };
