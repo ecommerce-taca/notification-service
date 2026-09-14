@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+.idea/
+.vscode/
+reports/
+.claude/
+.agent/
+bao-cao-cong-viec/
+
+
+# mock auth private key (bí mật)
+scripts/mock-auth/private.jwk.json
+
+# spec copy (sống ở repo taca, không thuộc code repo này)
+docs/
