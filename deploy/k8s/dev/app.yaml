@@ -40,8 +40,8 @@ spec:
             - name: SMTP_PASSWORD
               valueFrom: { secretKeyRef: { name: taca-smtp, key: SMTP_PASSWORD, optional: true } }
             - { name: EMAIL_FROM_NAME, value: Taca }
-            # Bắt buộc (zod); khi dùng Gmail nên đổi thành chính địa chỉ Gmail gửi đi
-            - { name: EMAIL_FROM_ADDRESS, value: no-reply@taca.vn }
+            # Bắt buộc (zod); Gmail chỉ cho gửi đúng địa chỉ của tài khoản SMTP
+            - { name: EMAIL_FROM_ADDRESS, value: tankhangkm12@gmail.com }
             - name: RECIPIENT_HASH_SECRET
               valueFrom: { secretKeyRef: { name: taca-app-secrets, key: RECIPIENT_HASH_SECRET } }
             - name: RECIPIENT_ENCRYPTION_SECRET
