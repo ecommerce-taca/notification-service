@@ -1,0 +1,69 @@
+# Manifest môi trường K8S dev. Job deploy-dev trong ci.yml thay __IMAGE__ bằng image develop-<sha> rồi kubectl apply.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  labels: { app: notification-service, part-of: taca }
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: { app: notification-service }
+  template:
+    metadata:
+      labels: { app: notification-service, part-of: taca }
+    spec:
+      containers:
+        - name: app
+          image: __IMAGE__
+          ports:
+            - { name: http, containerPort: 8080 }
+          envFrom:
+            - configMapRef: { name: taca-common }
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: PORT, value: "8080" }
+            - { name: DB_HOST, value: mysql-cluster.dev.svc }
+            - { name: DB_PORT, value: "3306" }
+            - { name: DB_USERNAME, value: notification }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: taca-app-secrets, key: NOTIF_DB_PASSWORD } }
+            - { name: DB_NAME, value: notificationdb }
+            - { name: KAFKA_CLIENT_ID, value: notification-service }
+            - { name: KAFKA_CONSUMER_GROUP_ID, value: notification-service }
+            # Gmail SMTP: SMTP_USER + SMTP_PASSWORD (App Password) nằm trong Secret taca-smtp
+            - { name: SMTP_HOST, value: smtp.gmail.com }
+            - { name: SMTP_PORT, value: "587" }
+            - { name: SMTP_SECURE, value: "false" }
+            - name: SMTP_USER
+              valueFrom: { secretKeyRef: { name: taca-smtp, key: SMTP_USER, optional: true } }
+            - name: SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: taca-smtp, key: SMTP_PASSWORD, optional: true } }
+            - { name: EMAIL_FROM_NAME, value: Taca }
+            - name: EMAIL_FROM_ADDRESS
+              valueFrom: { secretKeyRef: { name: taca-smtp, key: SMTP_USER, optional: true } }
+            - name: RECIPIENT_HASH_SECRET
+              valueFrom: { secretKeyRef: { name: taca-app-secrets, key: RECIPIENT_HASH_SECRET } }
+            - name: RECIPIENT_ENCRYPTION_SECRET
+              valueFrom: { secretKeyRef: { name: taca-app-secrets, key: RECIPIENT_ENCRYPTION_SECRET } }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 384Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  labels: { app: notification-service, part-of: taca }
+spec:
+  selector: { app: notification-service }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
